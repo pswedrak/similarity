@@ -1,14 +1,23 @@
 import sys
 import networkx as nx
 import plotly.graph_objects as go
+import numpy as np
 from nltk.corpus import wordnet as wn
+from nltk.corpus import stopwords
+from nltk.tokenize import word_tokenize
+
+
+class Node:
+    def __init__(self, name):
+        self.name = name
+        self.depth = 0
 
 
 def main():
     word1 = sys.argv[1]
     word2 = sys.argv[2]
 
-    concepts = wn.synsets(word1) + wn.synsets(word2)
+    concepts = wn.synsets(word1, pos='n') + wn.synsets(word2, pos='n')
     root = concepts[0].root_hypernyms()[0]
 
     graph = {root: []}
@@ -42,8 +51,44 @@ def main():
         for cc in c.hyponyms() + c.part_meronyms() + c.substance_meronyms() + c.part_holonyms() + c.substance_holonyms():
             insert_hypernyms(graph, cc, root)
 
-    graph = build_networx_graph(graph)
-    draw_graph(graph, word1, word2)
+    g, max_depth = build_networx_graph(graph, root)
+    dists = []
+
+    for c_i in wn.synsets(word1, pos='n'):
+        for c_j in wn.synsets(word2, pos='n'):
+            if g.has_node(str(c_i.name())) & g.has_node(str(c_j.name())):
+                nca_node = nearest_common_ancestor(g, str(c_i.name()), str(c_j.name()))
+                nca = g.nodes()[nca_node]['depth']
+                pl = shortest_path_length(g, nca_node, str(c_i.name())) + shortest_path_length(g, nca_node, str(c_j.name()))
+                gloss = gloss_value(c_i, c_j)
+                dist = pl * (1 - nca/max_depth) * (1 + gloss)
+                dists.append(dist)
+
+    if len(dists) == 0:
+        dist = 0
+        print(dist)
+    else:
+        dist = min(dists)
+        dist = np.exp(-dist/4)
+        print(dist)
+        draw_graph(g, word1, word2)
+
+
+def gloss_value(c_i, c_j):
+    stop_words = set(stopwords.words('english'))
+    filtered_words1 = [w for w in word_tokenize(c_i.definition()) if w not in stop_words and w.isalpha()]
+    filtered_words2 = [w for w in word_tokenize(c_j.definition()) if w not in stop_words and w.isalpha()]
+    common_words = [w for w in filtered_words1 + filtered_words2 if w in filtered_words1 and w in filtered_words2]
+    max_value = max(len(filtered_words1), len(filtered_words2))
+    return 1 - len(common_words) / max_value
+
+
+def shortest_path_length(g, c_i, c_j):
+    return nx.shortest_path_length(g, c_i, c_j)
+
+
+def nearest_common_ancestor(g, c_i, c_j):
+    return nx.lowest_common_ancestor(g, c_i, c_j)
 
 
 def insert_hypernyms(graph, c, root):
@@ -59,22 +104,72 @@ def insert_hypernyms(graph, c, root):
                 insert_hypernyms(graph, hypernym, root)
 
 
-def build_networx_graph(graph):
+def build_unweighted_graph(graph, root):
     g = nx.DiGraph()
+    MAX = 20
 
     for node in graph.keys():
-        g.add_node(str(node.name()))
+        g.add_node(str(node.name()), depth=0)
 
-    for node_from in graph.keys():
-        for node_to in graph[node_from]:
-            g.add_edge(str(node_from.name()), str(node_to.name()))
+    rootnode = None
+    for node in g.nodes():
+        if node == root.name():
+            rootnode = node
 
-    pos = nx.planar_layout(g)
+    pos = nx.spring_layout(g)
 
     for node in g.nodes():
         g.nodes[node]['pos'] = pos[node]
 
+    for node_from in graph.keys():
+        for node_to in graph[node_from]:
+            g.add_edge(str(node_from.name()), str(node_to.name()), weight=0)
+
     return g
+
+
+def build_networx_graph(graph, root):
+    g = nx.DiGraph()
+    MAX = 20
+
+    for node in graph.keys():
+        g.add_node(str(node.name()))
+
+    rootnode = None
+    for node in g.nodes():
+        if node == root.name():
+            rootnode = node
+
+    pos = nx.spring_layout(g)
+
+    for node in g.nodes():
+        g.nodes[node]['pos'] = pos[node]
+
+    for node_from in graph.keys():
+        for node_to in graph[node_from]:
+            g.add_edge(str(node_from.name()), str(node_to.name()), weight=0)
+
+    nodes_to_remove = []
+    for node in g.nodes():
+        if not nx.has_path(g, rootnode, node):
+            nodes_to_remove.append(node)
+
+    for node in nodes_to_remove:
+        g.remove_node(node)
+
+    max_depth = 0
+    for node in g.nodes():
+        depth = nx.shortest_path_length(g, rootnode, node)
+        if depth > max_depth:
+            max_depth = depth
+        g.nodes[node]['depth'] = depth
+
+    for edge in g.edges:
+        depth_from = g.nodes()[edge[0]]['depth']
+        depth_to = g.nodes()[edge[1]]['depth']
+        g.edges[edge]['weight'] = 1 - (depth_from + depth_to)/2*MAX
+
+    return g, max_depth
 
 
 def draw_graph(G, word1, word2):
@@ -93,7 +188,8 @@ def draw_graph(G, word1, word2):
     edge_trace = go.Scatter(
         x=edge_x, y=edge_y,
         line=dict(width=0.5, color='#888'),
-        hoverinfo='none',
+        hoverinfo='text',
+        textposition='top right',
         mode='lines')
 
     node_x = []
@@ -106,14 +202,16 @@ def draw_graph(G, word1, word2):
     node_adjacencies = []
     node_text = []
 
-    for node in G.nodes():
-        node_text.append(node)
+    for node in G.nodes.items():
+        node_text.append(node[0] + ' depth: ' + str(node[1]['depth']))
 
     node_trace = go.Scatter(
         x=node_x, y=node_y,
-        mode='markers+text',
-        text=node_text,
-        textposition='top right',
+        #mode='markers+text',
+        mode='markers',
+        #text=node_text,
+        #textposition='top right',
+        hoverinfo='text',
         marker=dict(
             showscale=True,
             colorscale='Rainbow',
