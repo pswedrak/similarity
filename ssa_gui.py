@@ -5,6 +5,8 @@ import numpy as np
 from nltk.corpus import wordnet as wn
 from nltk.corpus import stopwords
 from nltk.tokenize import word_tokenize
+from PyQt5.QtWidgets import QMainWindow, QApplication, QPushButton, QLineEdit, QLabel, QCheckBox
+from PyQt5.QtCore import pyqtSlot
 
 
 class Node:
@@ -14,31 +16,9 @@ class Node:
 
 
 def main():
-    if len(sys.argv) == 3:
-        word1 = sys.argv[1]
-        word2 = sys.argv[2]
-        g, dist = calculate_similarity(word1, word2)
-        print(dist)
-        draw_graph(g, word1, word2)
-    elif len(sys.argv) == 2:
-        filename = sys.argv[1]
-        filename_results = filename.split(".")[0] + '_results.txt'
-        fp2 = open(filename_results, 'w')
-
-        with open(filename) as fp:
-            line = fp.readline()
-            while line:
-                split_line = line.split(' ')
-                word1 = split_line[0]
-                word2 = split_line[1][:-1]
-                _, dist = calculate_similarity(word1, word2)
-                fp2.write(word1 + ' ' + word2 + ' ' + str(round(dist * 10, 2)))
-                fp2.write('\n')
-                line = fp.readline()
-        fp.close()
-        fp2.close()
-    else:
-        print('wrong number of arguments')
+    app = QApplication(sys.argv)
+    ex = App()
+    sys.exit(app.exec_())
 
 
 def calculate_similarity(word1, word2):
@@ -192,7 +172,67 @@ def build_networx_graph(graph, root):
 
 
 def draw_graph(G, word1, word2):
-    fig = go.Figure(layout=go.Layout(
+    edge_x = []
+    edge_y = []
+    for edge in G.edges():
+        x0, y0 = G.nodes[edge[0]]['pos']
+        x1, y1 = G.nodes[edge[1]]['pos']
+        edge_x.append(x0)
+        edge_x.append(x1)
+        edge_x.append(None)
+        edge_y.append(y0)
+        edge_y.append(y1)
+        edge_y.append(None)
+
+    edge_trace = go.Scatter(
+        x=edge_x, y=edge_y,
+        line=dict(width=0.5, color='#888'),
+        hoverinfo='text',
+        textposition='top right',
+        mode='lines')
+
+    node_x = []
+    node_y = []
+    for node in G.nodes():
+        x, y = G.nodes[node]['pos']
+        node_x.append(x)
+        node_y.append(y)
+
+    node_adjacencies = []
+    node_text = []
+
+    for node in G.nodes.items():
+        node_text.append(node[0] + ' depth: ' + str(node[1]['depth']))
+
+    node_trace = go.Scatter(
+        x=node_x, y=node_y,
+        #mode='markers+text',
+        mode='markers',
+        #text=node_text,
+        #textposition='top right',
+        hoverinfo='text',
+        marker=dict(
+            showscale=True,
+            colorscale='Rainbow',
+            reversescale=True,
+            color=[],
+            size=10,
+            colorbar=dict(
+                thickness=15,
+                title='Node Connections',
+                xanchor='left',
+                titleside='right'
+            ),
+            line_width=2))
+
+    for node, adjacencies in enumerate(G.adjacency()):
+        node_adjacencies.append(len(adjacencies[1]))
+
+    node_trace.marker.color = node_adjacencies
+    node_trace.text = node_text
+
+    fig = go.Figure(data=[edge_trace, node_trace],
+                    layout=go.Layout(
                         title='<br>Graph created for words: ' + word1 + ' and ' + word2,
                         titlefont_size=16,
                         showlegend=False,
@@ -206,61 +246,65 @@ def draw_graph(G, word1, word2):
                         xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
                         yaxis=dict(showgrid=False, zeroline=False, showticklabels=False))
                     )
-
-    concepts1 = wn.synsets(word1, pos='n')
-    concepts1 = list(map(lambda concept: concept.name(), concepts1))
-
-    concepts2 = wn.synsets(word2, pos='n')
-    concepts2 = list(map(lambda concept: concept.name(), concepts2))
-
-    for edge in G.edges():
-        edge_x = []
-        edge_y = []
-        x0, y0 = G.nodes[edge[0]]['pos']
-        x1, y1 = G.nodes[edge[1]]['pos']
-        edge_x.append(x0)
-        edge_y.append(y0)
-        edge_x.append(x1)
-        edge_y.append(y1)
-
-        edge_trace = go.Scatter(
-            x=edge_x, y=edge_y,
-            line=dict(width=0.5, color='violet'),
-            hoverinfo='text',
-            textposition='top right',
-            mode='lines')
-        fig.add_trace(edge_trace)
-
-    node_x = []
-    node_y = []
-    node_colours = []
-    for node in G.nodes():
-        x, y = G.nodes[node]['pos']
-        node_x.append(x)
-        node_y.append(y)
-        if node in concepts1:
-            node_colours.append('#ff0000')
-        elif node in concepts2:
-            node_colours.append('#000000')
-        else:
-            node_colours.append('#ffffff')
-
-    node_text = []
-
-    for node in G.nodes.items():
-        node_text.append(node[0] + ' depth: ' + str(node[1]['depth']))
-
-    node_trace = go.Scatter(
-        x=node_x, y=node_y,
-        mode='markers',
-        hoverinfo='text',
-        text=node_text,
-        marker=dict(
-            color=node_colours,
-            size=10,
-            line_width=2))
-    fig.add_trace(node_trace)
     fig.show()
+
+class App(QMainWindow):
+
+    def __init__(self):
+        super().__init__()
+        self.title = 'Semantic similarity'
+        self.left = 300
+        self.top = 300
+        self.width = 425
+        self.height = 220
+        self.textbox1 = QLineEdit(self)
+        self.textbox2 = QLineEdit(self)
+        self.textbox3 = QLineEdit(self)
+        self.l1 = QLabel(self)
+        self.l2 = QLabel(self)
+        self.l3 = QLabel(self)
+        self.l4 = QLabel(self)
+        self.checkbox = QCheckBox(self)
+        self.button = QPushButton('Calculate', self)
+        self.initUI()
+
+    def initUI(self):
+        self.setWindowTitle(self.title)
+        self.setGeometry(self.left, self.top, self.width, self.height)
+
+        self.l1.move(20, 13)
+        self.l1.setText("word 1: ")
+        self.textbox1.move(120, 20)
+        self.textbox1.resize(280, 20)
+
+        self.l2.move(20, 43)
+        self.l2.setText("word 2: ")
+        self.textbox2.move(120, 50)
+        self.textbox2.resize(280, 20)
+
+        self.l3.move(20, 73)
+        self.l3.setText("draw graph")
+
+        self.checkbox.move(120, 73)
+        self.button.move(20, 123)
+
+        self.l4.move(20, 163)
+        self.l4.setText("result:")
+        self.textbox3.move(120, 170)
+        self.textbox3.resize(280, 20)
+        self.textbox3.setReadOnly(True)
+
+        self.button.clicked.connect(self.on_click)
+        self.show()
+
+    @pyqtSlot()
+    def on_click(self):
+        word1 = self.textbox1.text()
+        word2 = self.textbox2.text()
+        g, dist = calculate_similarity(word1, word2)
+        self.textbox3.setText(str(np.round(dist * 10, 2)))
+        if self.checkbox.isChecked():
+            draw_graph(g, word1, word2)
 
 
 if __name__ == '__main__':
