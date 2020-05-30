@@ -7,7 +7,7 @@ All of them are treated as the same ones in criterion of similarity.
 
 ### Output
 
-For `custom_metric('cat', 'dog')` output is:
+For `sim_max_b('cat', 'dog')` output is:
 `PATHLEN:  4`, what is sum of `2+2`. Common concepts are both `Synset('carnivore.n.01')` and `Synset('male.n.02')`,
 that are on distance `2` from `dog` synsets as well as distance `2` from `cat` synsets 
 
