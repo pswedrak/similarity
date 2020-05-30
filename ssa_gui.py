@@ -23,6 +23,8 @@ def main():
 
 def calculate_similarity(word1, word2):
     concepts = wn.synsets(word1, pos='n') + wn.synsets(word2, pos='n')
+    if len(concepts) == 0:
+        return None, 0
     root = concepts[0].root_hypernyms()[0]
 
     graph = {root: []}
@@ -58,7 +60,8 @@ def calculate_similarity(word1, word2):
 
     g, max_depth = build_networx_graph(graph, root)
     max_depth = 20
-    dists = []
+    dist = np.finfo(np.float64).max
+    path = None
 
     for c_i in wn.synsets(word1, pos='n'):
         for c_j in wn.synsets(word2, pos='n'):
@@ -67,16 +70,17 @@ def calculate_similarity(word1, word2):
                 lch_value = g.nodes()[str(lch.name())]['depth']
                 pl = nx.dijkstra_path_length(g, str(c_i.name()), str(c_j.name()))
                 gloss = gloss_value(c_i, c_j)
-                dist = pl * (1 - lch_value / max_depth) * (1 + gloss)
-                dists.append(dist)
+                current_dist = pl * (1 - lch_value / max_depth) * (1 + gloss)
+                if current_dist < dist:
+                    dist = current_dist
+                    path = nx.dijkstra_path(g, str(c_i.name()), str(c_j.name()))
 
-    if len(dists) == 0:
+    if dist == np.finfo(np.float64).max:
         dist = 0
-        return g, dist
+        return g, dist, path
     else:
-        dist = min(dists)
         dist = np.exp(-dist / 4)
-        return g, dist
+        return g, dist, path
 
 
 def gloss_value(c_i, c_j):
@@ -171,68 +175,8 @@ def build_networx_graph(graph, root):
     return g, max_depth
 
 
-def draw_graph(G, word1, word2):
-    edge_x = []
-    edge_y = []
-    for edge in G.edges():
-        x0, y0 = G.nodes[edge[0]]['pos']
-        x1, y1 = G.nodes[edge[1]]['pos']
-        edge_x.append(x0)
-        edge_x.append(x1)
-        edge_x.append(None)
-        edge_y.append(y0)
-        edge_y.append(y1)
-        edge_y.append(None)
-
-    edge_trace = go.Scatter(
-        x=edge_x, y=edge_y,
-        line=dict(width=0.5, color='#888'),
-        hoverinfo='text',
-        textposition='top right',
-        mode='lines')
-
-    node_x = []
-    node_y = []
-    for node in G.nodes():
-        x, y = G.nodes[node]['pos']
-        node_x.append(x)
-        node_y.append(y)
-
-    node_adjacencies = []
-    node_text = []
-
-    for node in G.nodes.items():
-        node_text.append(node[0] + ' depth: ' + str(node[1]['depth']))
-
-    node_trace = go.Scatter(
-        x=node_x, y=node_y,
-        #mode='markers+text',
-        mode='markers',
-        #text=node_text,
-        #textposition='top right',
-        hoverinfo='text',
-        marker=dict(
-            showscale=True,
-            colorscale='Rainbow',
-            reversescale=True,
-            color=[],
-            size=10,
-            colorbar=dict(
-                thickness=15,
-                title='Node Connections',
-                xanchor='left',
-                titleside='right'
-            ),
-            line_width=2))
-
-    for node, adjacencies in enumerate(G.adjacency()):
-        node_adjacencies.append(len(adjacencies[1]))
-
-    node_trace.marker.color = node_adjacencies
-    node_trace.text = node_text
-
-    fig = go.Figure(data=[edge_trace, node_trace],
-                    layout=go.Layout(
+def draw_graph(G, word1, word2, path):
+    fig = go.Figure(layout=go.Layout(
                         title='<br>Graph created for words: ' + word1 + ' and ' + word2,
                         titlefont_size=16,
                         showlegend=False,
@@ -246,7 +190,71 @@ def draw_graph(G, word1, word2):
                         xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
                         yaxis=dict(showgrid=False, zeroline=False, showticklabels=False))
                     )
+
+    concepts1 = wn.synsets(word1, pos='n')
+    concepts1 = list(map(lambda concept: concept.name(), concepts1))
+
+    concepts2 = wn.synsets(word2, pos='n')
+    concepts2 = list(map(lambda concept: concept.name(), concepts2))
+
+    edges_in_shortest_path = []
+    for i in range(len(path)-1):
+        edges_in_shortest_path.append((path[i], path[i+1]))
+
+    for edge in G.edges():
+        edge_x = []
+        edge_y = []
+        x0, y0 = G.nodes[edge[0]]['pos']
+        x1, y1 = G.nodes[edge[1]]['pos']
+        edge_x.append(x0)
+        edge_y.append(y0)
+        edge_x.append(x1)
+        edge_y.append(y1)
+
+        if edge in edges_in_shortest_path:
+            edge_color = 'black'
+        else:
+            edge_color = 'lightblue'
+
+        edge_trace = go.Scatter(
+            x=edge_x, y=edge_y,
+            line=dict(width=0.5, color=edge_color),
+            hoverinfo='text',
+            textposition='top right',
+            mode='lines')
+        fig.add_trace(edge_trace)
+
+    node_x = []
+    node_y = []
+    node_colours = []
+    for node in G.nodes():
+        x, y = G.nodes[node]['pos']
+        node_x.append(x)
+        node_y.append(y)
+        if node in concepts1:
+            node_colours.append('#ff0000')
+        elif node in concepts2:
+            node_colours.append('#000000')
+        else:
+            node_colours.append('#ffffff')
+
+    node_text = []
+
+    for node in G.nodes.items():
+        node_text.append(node[0] + ' depth: ' + str(node[1]['depth']))
+
+    node_trace = go.Scatter(
+        x=node_x, y=node_y,
+        mode='markers',
+        hoverinfo='text',
+        text=node_text,
+        marker=dict(
+            color=node_colours,
+            size=10,
+            line_width=2))
+    fig.add_trace(node_trace)
     fig.show()
+
 
 class App(QMainWindow):
 
@@ -301,10 +309,10 @@ class App(QMainWindow):
     def on_click(self):
         word1 = self.textbox1.text()
         word2 = self.textbox2.text()
-        g, dist = calculate_similarity(word1, word2)
+        g, dist, path = calculate_similarity(word1, word2)
         self.textbox3.setText(str(np.round(dist * 10, 2)))
         if self.checkbox.isChecked():
-            draw_graph(g, word1, word2)
+            draw_graph(g, word1, word2, path)
 
 
 if __name__ == '__main__':

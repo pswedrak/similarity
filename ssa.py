@@ -17,9 +17,10 @@ def main():
     if len(sys.argv) == 3:
         word1 = sys.argv[1]
         word2 = sys.argv[2]
-        g, dist = calculate_similarity(word1, word2)
+        g, dist, path = calculate_similarity(word1, word2)
         print(dist)
-        draw_graph(g, word1, word2)
+        if g is not None:
+            draw_graph(g, word1, word2, path)
     elif len(sys.argv) == 2:
         filename = sys.argv[1]
         filename_results = filename.split(".")[0] + '_results.txt'
@@ -31,7 +32,7 @@ def main():
                 split_line = line.split(' ')
                 word1 = split_line[0]
                 word2 = split_line[1][:-1]
-                _, dist = calculate_similarity(word1, word2)
+                _, dist, path = calculate_similarity(word1, word2)
                 fp2.write(word1 + ' ' + word2 + ' ' + str(round(dist * 10, 2)))
                 fp2.write('\n')
                 line = fp.readline()
@@ -43,6 +44,8 @@ def main():
 
 def calculate_similarity(word1, word2):
     concepts = wn.synsets(word1, pos='n') + wn.synsets(word2, pos='n')
+    if len(concepts) == 0:
+        return None, 0
     root = concepts[0].root_hypernyms()[0]
 
     graph = {root: []}
@@ -78,7 +81,8 @@ def calculate_similarity(word1, word2):
 
     g, max_depth = build_networx_graph(graph, root)
     max_depth = 20
-    dists = []
+    dist = np.finfo(np.float64).max
+    path = None
 
     for c_i in wn.synsets(word1, pos='n'):
         for c_j in wn.synsets(word2, pos='n'):
@@ -87,16 +91,17 @@ def calculate_similarity(word1, word2):
                 lch_value = g.nodes()[str(lch.name())]['depth']
                 pl = nx.dijkstra_path_length(g, str(c_i.name()), str(c_j.name()))
                 gloss = gloss_value(c_i, c_j)
-                dist = pl * (1 - lch_value / max_depth) * (1 + gloss)
-                dists.append(dist)
+                current_dist = pl * (1 - lch_value / max_depth) * (1 + gloss)
+                if current_dist < dist:
+                    dist = current_dist
+                    path = nx.dijkstra_path(g, str(c_i.name()), str(c_j.name()))
 
-    if len(dists) == 0:
+    if dist == np.finfo(np.float64).max:
         dist = 0
-        return g, dist
+        return g, dist, path
     else:
-        dist = min(dists)
         dist = np.exp(-dist / 4)
-        return g, dist
+        return g, dist, path
 
 
 def gloss_value(c_i, c_j):
@@ -191,7 +196,7 @@ def build_networx_graph(graph, root):
     return g, max_depth
 
 
-def draw_graph(G, word1, word2):
+def draw_graph(G, word1, word2, path):
     fig = go.Figure(layout=go.Layout(
                         title='<br>Graph created for words: ' + word1 + ' and ' + word2,
                         titlefont_size=16,
@@ -213,6 +218,10 @@ def draw_graph(G, word1, word2):
     concepts2 = wn.synsets(word2, pos='n')
     concepts2 = list(map(lambda concept: concept.name(), concepts2))
 
+    edges_in_shortest_path = []
+    for i in range(len(path)-1):
+        edges_in_shortest_path.append((path[i], path[i+1]))
+
     for edge in G.edges():
         edge_x = []
         edge_y = []
@@ -223,9 +232,14 @@ def draw_graph(G, word1, word2):
         edge_x.append(x1)
         edge_y.append(y1)
 
+        if edge in edges_in_shortest_path:
+            edge_color = 'black'
+        else:
+            edge_color = 'lightblue'
+
         edge_trace = go.Scatter(
             x=edge_x, y=edge_y,
-            line=dict(width=0.5, color='violet'),
+            line=dict(width=0.5, color=edge_color),
             hoverinfo='text',
             textposition='top right',
             mode='lines')
