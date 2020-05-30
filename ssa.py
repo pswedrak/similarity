@@ -14,9 +14,34 @@ class Node:
 
 
 def main():
-    word1 = sys.argv[1]
-    word2 = sys.argv[2]
+    if len(sys.argv) == 3:
+        word1 = sys.argv[1]
+        word2 = sys.argv[2]
+        g, dist = calculate_similarity(word1, word2)
+        print(dist)
+        draw_graph(g, word1, word2)
+    elif len(sys.argv) == 2:
+        filename = sys.argv[1]
+        filename_results = filename.split(".")[0] + '_results.txt'
+        fp2 = open(filename_results, 'w')
 
+        with open(filename) as fp:
+            line = fp.readline()
+            while line:
+                split_line = line.split(' ')
+                word1 = split_line[0]
+                word2 = split_line[1][:-1]
+                _, dist = calculate_similarity(word1, word2)
+                fp2.write(word1 + ' ' + word2 + ' ' + str(round(dist*10, 2)))
+                fp2.write('\n')
+                line = fp.readline()
+        fp.close()
+        fp2.close()
+    else:
+        print('wrong number of arguments')
+
+
+def calculate_similarity(word1, word2):
     concepts = wn.synsets(word1, pos='n') + wn.synsets(word2, pos='n')
     root = concepts[0].root_hypernyms()[0]
 
@@ -57,21 +82,22 @@ def main():
     for c_i in wn.synsets(word1, pos='n'):
         for c_j in wn.synsets(word2, pos='n'):
             if g.has_node(str(c_i.name())) & g.has_node(str(c_j.name())):
-                nca_node = nearest_common_ancestor(g, str(c_i.name()), str(c_j.name()))
-                nca = g.nodes()[nca_node]['depth']
-                pl = shortest_path_length(g, nca_node, str(c_i.name())) + shortest_path_length(g, nca_node, str(c_j.name()))
+                lch = c_i.lowest_common_hypernyms(c_j)[0]
+                lch_node = g.nodes[str(lch.name())]
+                lch_value = lch_node['depth']
+                pl = shortest_path_length(g, str(lch.name()), str(c_i.name())) + shortest_path_length(g, str(lch.name()),
+                                                                                              str(c_j.name()))
                 gloss = gloss_value(c_i, c_j)
-                dist = pl * (1 - nca/max_depth) * (1 + gloss)
+                dist = pl * (1 - lch_value / max_depth) * (1 + gloss)
                 dists.append(dist)
 
     if len(dists) == 0:
         dist = 0
-        print(dist)
+        return g, dist
     else:
         dist = min(dists)
-        dist = np.exp(-dist/4)
-        print(dist)
-        draw_graph(g, word1, word2)
+        dist = np.exp(-dist / 8)
+        return g, dist
 
 
 def gloss_value(c_i, c_j):
@@ -95,7 +121,7 @@ def insert_hypernyms(graph, c, root):
         if c == root:
             return
         else:
-            for hypernym in c.hypernyms():
+            for hypernym in c.hypernyms() + c.instance_hypernyms():
                 if hypernym in graph.keys():
                     if c not in graph[hypernym]:
                         graph[hypernym].append(c)
@@ -148,14 +174,6 @@ def build_networx_graph(graph, root):
     for node_from in graph.keys():
         for node_to in graph[node_from]:
             g.add_edge(str(node_from.name()), str(node_to.name()), weight=0)
-
-    nodes_to_remove = []
-    for node in g.nodes():
-        if not nx.has_path(g, rootnode, node):
-            nodes_to_remove.append(node)
-
-    for node in nodes_to_remove:
-        g.remove_node(node)
 
     max_depth = 0
     for node in g.nodes():
