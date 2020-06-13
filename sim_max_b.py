@@ -15,7 +15,6 @@ def sim_max_b(word1, word2):
     w2 = wordnet.synsets(word2)
     graph1['0'] = w1
     graph2['0'] = w2
-
     if word1 == word2:
         return graph1, graph2, 1., graph, set(w1).intersection(w2), None
 
@@ -36,7 +35,6 @@ def sim_max_b(word1, word2):
         print('Graph is not planar, so no visualization will be provided')
 
     sim = hh_hm_link_factor * hh_hm_depth_factor**(path_len[0] + path_len[1] - 1)
-
     return graph1, graph2, sim, graph, common, path
 
 
@@ -56,13 +54,17 @@ def find_path(graph1, graph2, path_len, common):
     list1 = []
     list2 = []
     conc = common
+    hh = 0
+    hm = 0
     for i in range(path_len[0]-1, -1, -1):
         key = str(i)
         for syns in conc:
-            hypo_hyper = set(graph1[key]).intersection(set(syns.hyponyms() + syns.hypernyms()))
-            holo_mero = set(graph1[key]).intersection(set(syns.part_holonyms() + syns.part_meronyms() +
-                                                          syns.member_holonyms() + syns.member_meronyms()))
-
+            hypo_hyper = set(graph1[key]).intersection(set(syns.hyponyms() + syns.hypernyms() + syns.instance_hypernyms() + syns.instance_hyponyms()))
+            holo_mero = set(graph2[key]).intersection(
+                set(syns.part_holonyms() + syns.part_meronyms() + syns.substance_holonyms() +
+                    syns.member_holonyms() + syns.member_meronyms() + syns.substance_meronyms()))
+            hh = hh + 1 if len(hypo_hyper) > 0 else hh
+            hm = hm + 1 if len(holo_mero) > 0 else hm
             conc = list(hypo_hyper.union(holo_mero))
             if conc not in list1:
                 list1.insert(0, conc)
@@ -70,14 +72,15 @@ def find_path(graph1, graph2, path_len, common):
     for i in range(path_len[1]-1, -1, -1):
         key = str(i)
         for syns in conc:
-            hypo_hyper = set(graph2[key]).intersection(set(syns.hyponyms() + syns.hypernyms()))
-            holo_mero = set(graph2[key]).intersection(set(syns.part_holonyms() + syns.part_meronyms() +
-                                                          syns.member_holonyms() + syns.member_meronyms()))
-
+            hypo_hyper = set(graph2[key]).intersection(set(syns.hyponyms() + syns.hypernyms() + syns.instance_hypernyms() + syns.instance_hyponyms()))
+            holo_mero = set(graph2[key]).intersection(
+                set(syns.part_holonyms() + syns.part_meronyms() + syns.substance_holonyms() +
+                    syns.member_holonyms() + syns.member_meronyms() + syns.substance_meronyms()))
+            hh = hh + 1 if len(hypo_hyper) > 0 else hh
+            hm = hm + 1 if len(holo_mero) > 0 else hm
             conc = list(hypo_hyper.union(holo_mero))
             if conc not in list2:
                 list2.append(conc)
-
     return [syn.name() for syn in flatten(list1)+list(common)+flatten(list2)]
 
 
@@ -91,14 +94,14 @@ def add_to_graph(synsetsU, synsetsV, nx_graph):
 
 
 def get_connected_synsets(w1, w2, nx_graph=None):
-    w1_hypernyms = [w.hypernyms() for w in w1]
-    w2_hypernyms = [w.hypernyms() for w in w2]
-    w1_hyponyms = [w.hyponyms() for w in w1]
-    w2_hyponyms = [w.hyponyms() for w in w2]
-    w1_holonyms = [w.member_holonyms() + w.part_holonyms() for w in w1]
-    w2_holonyms = [w.member_holonyms() + w.part_holonyms() for w in w2]
-    w1_meronyms = [w.part_meronyms() + w.member_meronyms() for w in w1]
-    w2_meronyms = [w.part_meronyms() + w.member_meronyms() for w in w2]
+    w1_hypernyms = [w.hypernyms() + w.instance_hypernyms() for w in w1]
+    w2_hypernyms = [w.hypernyms() + w.instance_hypernyms() for w in w2]
+    w1_hyponyms = [w.hyponyms() + w.instance_hyponyms() for w in w1]
+    w2_hyponyms = [w.hyponyms() + w.instance_hyponyms() for w in w2]
+    w1_holonyms = [w.member_holonyms() + w.part_holonyms() + w.substance_holonyms() for w in w1]
+    w2_holonyms = [w.member_holonyms() + w.part_holonyms() + w.substance_holonyms() for w in w2]
+    w1_meronyms = [w.part_meronyms() + w.member_meronyms() + w.substance_meronyms() for w in w1]
+    w2_meronyms = [w.part_meronyms() + w.member_meronyms() + w.substance_meronyms() for w in w2]
 
     if nx_graph is not None:
         nx_graph = add_to_graph(w1, w1_hypernyms, nx_graph)
@@ -116,7 +119,6 @@ def get_connected_synsets(w1, w2, nx_graph=None):
 
 def search_path(graph1, graph2, w1, w2, depth, nx_graph=None, common=None):
     if depth > threshold:
-        # print('Too far from ')
         return graph1, graph2, float('Inf'), nx_graph, common
 
     w1_syns, w2_syns, nx_graph = get_connected_synsets(w1, w2, nx_graph=nx_graph)
@@ -140,7 +142,7 @@ def search_path(graph1, graph2, w1, w2, depth, nx_graph=None, common=None):
     return graph1, graph2, path_len, nx_graph, common
 
 
-def draw_graph(G, paths, word1, word2):
+def draw_graph_sim(G, paths, word1, word2, sim):
     edge_x = []
     edge_y = []
     edge_path_x = []
@@ -148,9 +150,8 @@ def draw_graph(G, paths, word1, word2):
     for edge in G.edges():
         x0, y0 = G.nodes[edge[0]]['pos']
         x1, y1 = G.nodes[edge[1]]['pos']
-        print('Paths: ', paths)
+
         if edge[0] in paths and edge[1] in paths:
-            print('Appending: ', edge)
             edge_path_x.append(x0)
             edge_path_x.append(x1)
             edge_path_x.append(None)
@@ -173,7 +174,7 @@ def draw_graph(G, paths, word1, word2):
 
     edge_trace_path = go.Scatter(
         x=edge_path_x, y=edge_path_y,
-        line=dict(width=0.9, color='#555'),
+        line=dict(width=1, color='firebrick'),
         hoverinfo='none',
         mode='lines')
 
@@ -189,7 +190,6 @@ def draw_graph(G, paths, word1, word2):
             node_start_end_x.append(x)
             node_start_end_y.append(y)
         elif node in paths:
-            print('Found: ', node, ' in ', paths)
             node_path_x.append(x)
             node_path_y.append(y)
         else:
@@ -211,21 +211,21 @@ def draw_graph(G, paths, word1, word2):
     node_trace = go.Scatter(
         x=node_x, y=node_y,
         mode='markers+text',
-        text=node_text,
+        # text=node_text,
         textposition='top right',
         marker=dict(
             showscale=True,
             colorscale='Rainbow',
             reversescale=True,
             color=[],
-            size=10,
+            size=7,
             colorbar=dict(
                 thickness=15,
                 title='Node Connections',
                 xanchor='left',
                 titleside='right'
             ),
-            line_width=2))
+            line_width=0.5))
 
     node_trace_path = go.Scatter(
         x=node_path_x, y=node_path_y,
@@ -238,7 +238,7 @@ def draw_graph(G, paths, word1, word2):
             reversescale=True,
             color=[],
             size=20,
-            line_width=3))
+            line_width=2))
 
     node_trace_path_start_end = go.Scatter(
         x=node_start_end_x, y=node_start_end_y,
@@ -254,7 +254,6 @@ def draw_graph(G, paths, word1, word2):
             line_width=3))
 
     for node, adjacencies in enumerate(G.adjacency()):
-        a = adjacencies  # a[0] - nazwa, a[1] sąsiedzi
         node_adjacencies.append(len(adjacencies[1]))
 
     node_trace.marker.color = node_adjacencies
@@ -262,7 +261,7 @@ def draw_graph(G, paths, word1, word2):
 
     fig = go.Figure(data=[edge_trace, edge_trace_path, node_trace, node_trace_path, node_trace_path_start_end],
                     layout=go.Layout(
-                        title='<br>Graph created for words: ' + word1 + ' and ' + word2,
+                        title='<br>Graph created for words: ' + word1 + ' and ' + word2 + ': similarity = ' + str(round(sim, 5)),
                         titlefont_size=16,
                         showlegend=False,
                         hovermode='closest',
@@ -277,23 +276,20 @@ def draw_graph(G, paths, word1, word2):
                     )
     fig.show()
 
-graph1, graph2, pathlen, nx_graph, comm, path = sim_max_b('car', 'truck')
-draw_graph(nx_graph, path, 'car', 'truck')
 
 def results_for_file(file):
     res = []
-    act_exp = []
+    act = []
+    exp = []
+    wr = open('result.txt', 'w')
     with open(file, 'r') as f:
         lines = f.readlines()
-        # print('Word1  Word2  Original  Actual')
         for line in lines:
             tokens = line.split()
-            _, _, result, _, _ = sim_max_b(tokens[0], tokens[1])
-            # print(tokens[0], ' ', tokens[1], ' ', tokens[2], ' ', result)
+            _, _, result, _, _, _ = sim_max_b(tokens[0], tokens[1])
             res.append([tokens[0], tokens[1], tokens[2], result*10])
-            act_exp.append([float(tokens[2]), result*10])
-    return res, act_exp
-
-# res, act_exp = results_for_file(Path('set1.txt'))
-# print(tabulate(res, headers=['Word1',  'Word2',  'Original',  'Actual']))
-
+            wr.writelines(tokens[0] + ' ' + tokens[1] + ' ' + str(round(result*10, 4)) + '\n')
+            act.append(float(tokens[2]))
+            exp.append(result*10)
+    wr.close()
+    return res, act, exp
