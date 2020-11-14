@@ -3,12 +3,15 @@ import networkx as nx
 import plotly.graph_objects as go
 
 threshold = 6
-hh_hm_depth_factor = 0.7
-hh_hm_link_factor = 0.85
+hh_depth_factor = 0.7
+hm_depth_factor = 0.7
+hh_link_factor = 0.85
+hm_link_factor = 0.85
 
 
 def sim_max_b(word1, word2):
-    graph = nx.DiGraph()
+    graph = nx.Graph()
+    # graph = nx.DiGraph()
     graph1 = {}
     graph2 = {}
     w1 = wordnet.synsets(word1)
@@ -16,26 +19,30 @@ def sim_max_b(word1, word2):
     graph1['0'] = w1
     graph2['0'] = w2
     if word1 == word2:
-        return graph1, graph2, 1., graph, set(w1).intersection(w2), None
+        return graph1, graph2, 1., None, set(w1).intersection(w2), None, w1, w2
 
     if set(w1).intersection(w2) or is_syn_or_ano(w1, w2):
-        return graph1, graph2, 0.9, graph, None, None
+        return graph1, graph2, 0.9, None, None, None, w1, w2
     common_val = []
     graph1, graph2, path_len, graph, common = search_path(graph1, graph2, w1, w2, 1, nx_graph=graph, common=common_val)
     if path_len == float('Inf'):
-        return graph1, graph2, 0., graph, None, None
+        return graph1, graph2, 0., graph, None, None, w1, w2
 
-    path = find_path(graph1, graph2, path_len, common)
+    path, hh, hm = find_path(graph1, graph2, path_len, common)
 
     try:
         pos = nx.planar_layout(graph)
+        # pos = nx.circular_layout(graph)
         for node in graph.nodes():
             graph.nodes[node]['pos'] = pos[node]
     except:
         print('Graph is not planar, so no visualization will be provided')
 
-    sim = hh_hm_link_factor * hh_hm_depth_factor**(path_len[0] + path_len[1] - 1)
-    return graph1, graph2, sim, graph, common, path
+    if hm == 0:
+        sim = hh_link_factor * hm_depth_factor**hm * hh_depth_factor**hh
+    else:
+        sim = hm_link_factor * hm_depth_factor**hm * hh_depth_factor**hh
+    return graph1, graph2, sim, graph, common, path, w1, w2
 
 
 flatten = lambda l: [item for sublist in l for item in sublist]
@@ -69,7 +76,7 @@ def find_path(graph1, graph2, path_len, common):
             if conc not in list1:
                 list1.insert(0, conc)
     conc = common
-    for i in range(path_len[1]-1, -1, -1):
+    for i in range(path_len[1]-1, 0, -1):
         key = str(i)
         for syns in conc:
             hypo_hyper = set(graph2[key]).intersection(set(syns.hyponyms() + syns.hypernyms() + syns.instance_hypernyms() + syns.instance_hyponyms()))
@@ -81,7 +88,7 @@ def find_path(graph1, graph2, path_len, common):
             conc = list(hypo_hyper.union(holo_mero))
             if conc not in list2:
                 list2.append(conc)
-    return [syn.name() for syn in flatten(list1)+list(common)+flatten(list2)]
+    return [syn.name() for syn in flatten(list1)+list(common)+flatten(list2)], hh, hm
 
 
 def add_to_graph(synsetsU, synsetsV, nx_graph):
@@ -166,17 +173,6 @@ def draw_graph_sim(G, paths, word1, word2, sim):
         edge_y.append(y1)
         edge_y.append(None)
 
-    edge_trace = go.Scatter(
-        x=edge_x, y=edge_y,
-        line=dict(width=0.5, color='#888'),
-        hoverinfo='none',
-        mode='lines')
-
-    edge_trace_path = go.Scatter(
-        x=edge_path_x, y=edge_path_y,
-        line=dict(width=1, color='firebrick'),
-        hoverinfo='none',
-        mode='lines')
 
     node_x = []
     node_y = []
@@ -210,33 +206,19 @@ def draw_graph_sim(G, paths, word1, word2, sim):
 
     node_trace = go.Scatter(
         x=node_x, y=node_y,
-        mode='markers+text',
-        # text=node_text,
-        textposition='top right',
+        mode='markers',
         marker=dict(
-            showscale=True,
-            colorscale='Rainbow',
-            reversescale=True,
-            color=[],
+            colorscale=[[0, 'rgb(200,200,200)'], [1, 'rgb(200,200,200)']],
+            color='#888',
             size=7,
-            colorbar=dict(
-                thickness=15,
-                title='Node Connections',
-                xanchor='left',
-                titleside='right'
-            ),
             line_width=0.5))
 
     node_trace_path = go.Scatter(
         x=node_path_x, y=node_path_y,
-        mode='markers+text',
-        text=node_text_path,
-        textposition='top right',
+        mode='markers',
         marker=dict(
-            showscale=False,
-            colorscale='Rainbow',
-            reversescale=True,
-            color=[],
+            colorscale=[[0, 'rgb(200,200,200)'], [1, 'rgb(200,200,200)']],
+            color='#000',
             size=20,
             line_width=2))
 
@@ -246,10 +228,7 @@ def draw_graph_sim(G, paths, word1, word2, sim):
         text=node_text_start_end,
         textposition='top right',
         marker=dict(
-            showscale=False,
-            colorscale='Rainbow',
-            reversescale=True,
-            color=[],
+            color='#000',
             size=20,
             line_width=3))
 
@@ -259,13 +238,26 @@ def draw_graph_sim(G, paths, word1, word2, sim):
     node_trace.marker.color = node_adjacencies
     node_trace_path.marker.color = node_adjacencies
 
+    edge_trace = go.Scatter(
+        x=edge_x, y=edge_y,
+        line=dict(width=0.5, color='#888'),
+        hoverinfo='none',
+        mode='lines')
+
+    edge_trace_path = go.Scatter(
+        x=edge_path_x, y=edge_path_y,
+        line=dict(width=1, color='firebrick'),
+        hoverinfo='none',
+        mode='lines')
+
     fig = go.Figure(data=[edge_trace, edge_trace_path, node_trace, node_trace_path, node_trace_path_start_end],
                     layout=go.Layout(
                         title='<br>Graph created for words: ' + word1 + ' and ' + word2 + ': similarity = ' + str(round(sim, 5)),
-                        titlefont_size=16,
                         showlegend=False,
                         hovermode='closest',
                         margin=dict(b=20, l=5, r=5, t=40),
+                        paper_bgcolor='rgba(0,0,0,0)',
+                        plot_bgcolor='rgba(0,0,0,0)',
                         annotations=[dict(
                             text="",
                             showarrow=False,
@@ -293,3 +285,80 @@ def results_for_file(file):
             exp.append(result*10)
     wr.close()
     return res, act, exp
+
+
+def find_highest(syns1, syns2, model_):
+    print('Finding highest similarity')
+    sim = -100
+    for syn1 in syns1:
+        for syn2 in syns2:
+            s1 = str(syn1)
+            s2 = str(syn2)
+            sim12 = model_.wv.similarity(s1[8:len(s1)-2], s2[8:len(s2)-2])
+            print(sim12)
+            if sim12 > sim:
+                sim = sim12
+                print('found new highest: ' + str(sim))
+    print('returning ' + str(sim))
+    return sim
+
+
+file_res = open('simmaxb_word2vec_article.csv', 'w+')
+times = open('times_simmaxb_word2vec_ps_1_82', 'w+')
+
+
+# import time
+# from node2vec import Node2Vec
+# from scipy import spatial
+#
+#
+# def calculate_node2vec_similarity(word1, word2):
+#     _, _, _, graph, _, _, concepts1, concepts2 = sim_max_b(word1, word2.replace('\n', ''))
+#
+#     node2vec = Node2Vec(graph, dimensions=20, walk_length=16, num_walks=16, p=10, q=0.5, workers=4)
+#     model = node2vec.fit(window=10, min_count=1)
+#
+#     similarities = []
+#
+#     print('cs1 ' + str(concepts1))
+#     print('cs2 ' + str(concepts2))
+#     for concept1 in concepts1:
+#         for concept2 in concepts2:
+#             print('c1 ' + str(concept1))
+#             print('c2 ' + str(concept2))
+#             vector1 = model.wv[concept1.name()]
+#             vector2 = model.wv[concept2.name()]
+#             print(spatial.distance.cosine(vector1, vector2))
+#             similarity = 1 - spatial.distance.cosine(vector1, vector2)
+#             similarities.append(similarity)
+#
+#     if len(similarities) == 0:
+#         return 0
+#     else:
+#         return max(similarities) * 10
+#
+#
+# with open('to_article', 'r') as wordsim:
+#     while True:
+#         line = wordsim.readline().split(';')
+#         if not line:
+#             break
+#         print(line)
+#         st = time.time_ns()
+#         _, _, _, graph, _, _, w1, w2 = sim_max_b(line[0], line[1])
+#         if graph is not None:
+#             result = calculate_node2vec_similarity(line[0], line[1])
+#             t = time.time_ns() - st
+#             file_res.write(line[0]+';'+line[1]+';'+str(round(result, 2))+'\n')
+#             # times.write(str(t) + '\n')
+#             print(line[0]+' ' + line[1] + ' ' + str(result))
+#         else:
+#             file_res.write(line[0] + ';' + line[1] + ';' + '------------UNABLE TO CALCULATE-----------' + '\n')
+#
+#         file_res.flush()
+#         # times.flush()
+#         # time.sleep(10)
+# file_res.close()
+# times.close()
+
+
